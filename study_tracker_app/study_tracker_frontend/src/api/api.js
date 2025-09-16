@@ -45,6 +45,16 @@ export const updateRecord = (record) => {
 };
 
 /**
+ * **学習記録をバックエンドで削除します。**
+ * @async
+ * @param {number} id - 削除する学習記録のID。
+ * @returns {Promise<Object>} 削除操作のレスポンスを含むPromise。
+ */
+export const deleteRecord = (id) => {
+  return api.delete(`records/${id}/`);
+};
+
+/**
  * 学習テーマのリストをバックエンドから取得します。
  * @async
  * @returns {Promise<Object>} 学習テーマのデータを含むPromise。

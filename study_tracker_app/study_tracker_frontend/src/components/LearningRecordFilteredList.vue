@@ -1,36 +1,36 @@
 <template>
   <div class="learning-record-list">
     <h3>学習記録一覧</h3>
-    <div v-if="records.length > 0">
-      <table>
-        <thead>
-          <tr>
-            <th>日付</th>
-            <th>テーマ</th>
-            <th>計画時間 (分)</th>
-            <th>実績時間 (分)</th>
-            <th>メモ</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="record in sortedRecords" :key="record.id">
-            <td>{{ record.date }}</td>
-            <td>{{ getTopicTitle(record.topic) }}</td>
-            <td>{{ record.planned_minutes }}</td>
-            <td>{{ record.minutes }}</td>
-            <td>{{ record.memo }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div v-else class="no-records">
-      <p>この月にはまだ学習記録がありません。</p>
-    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>日付</th>
+          <th>テーマ</th>
+          <th>予定 (分)</th>
+          <th>実績 (分)</th>
+          <th>メモ</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="record in records" :key="record.id">
+          <td>{{ record.date }}</td>
+          <td>{{ getTopicTitle(record.topic) }}</td>
+          <td>{{ record.planned_minutes }}</td>
+          <td>{{ record.minutes }}</td>
+          <td>{{ record.memo }}</td>
+          <td>
+            <button class="edit-btn" @click="$emit('edit-record', record)">編集</button>
+            <button class="delete-btn" @click="$emit('delete-record', record.id)">削除</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </template>
 
 <script setup>
-import { computed, toRefs } from 'vue';
+import { defineProps, defineEmits } from 'vue';
 
 /**
  * @typedef {Object} LearningRecord
@@ -41,7 +41,6 @@ import { computed, toRefs } from 'vue';
  * @property {number} planned_minutes - 予定時間（分）。
  * @property {string} memo - 記録のメモ。
  */
-
 /**
  * @typedef {Object} Topic
  * @property {number} id - テーマのID。
@@ -51,7 +50,7 @@ import { computed, toRefs } from 'vue';
 const props = defineProps({
   /**
    * @type {Array<LearningRecord>}
-   * フィルタリングされた学習記録の配列。
+   * 表示する学習記録の配列。
    */
   records: {
     type: Array,
@@ -59,7 +58,7 @@ const props = defineProps({
   },
   /**
    * @type {Array<Topic>}
-   * すべてのテーマの配列。
+   * 学習テーマの配列。テーマIDからタイトルを取得するために使用されます。
    */
   topics: {
     type: Array,
@@ -67,23 +66,28 @@ const props = defineProps({
   },
 });
 
-const { records, topics } = toRefs(props);
+const emit = defineEmits([
+  /**
+   * @event edit-record
+   * 編集ボタンがクリックされたときに発生するイベント。
+   * @param {LearningRecord} record - 編集対象の学習記録オブジェクト。
+   */
+  'edit-record',
+  /**
+   * @event delete-record
+   * 削除ボタンがクリックされたときに発生するイベント。
+   * @param {number} recordId - 削除対象の学習記録のID。
+   */
+  'delete-record',
+]);
 
 /**
- * @type {import('vue').ComputedRef<Array<LearningRecord>>}
- * 日付の降順でソートされた学習記録の配列。
- */
-const sortedRecords = computed(() => {
-  return [...records.value].sort((a, b) => b.date.localeCompare(a.date));
-});
-
-/**
- * 指定されたトピックIDに対応するテーマのタイトルを取得する。
+ * テーマIDからテーマのタイトルを取得するヘルパー関数。
  * @param {number} topicId - 検索するテーマのID。
- * @returns {string} テーマのタイトル。見つからない場合は'不明'。
+ * @returns {string} 見つかったテーマのタイトル、または'不明'。
  */
 const getTopicTitle = (topicId) => {
-  const topic = topics.value.find((t) => t.id === topicId);
+  const topic = props.topics.find(t => t.id === topicId);
   return topic ? topic.title : '不明';
 };
 </script>
@@ -96,39 +100,41 @@ const getTopicTitle = (topicId) => {
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
-h3 {
-  margin-top: 0;
-  color: #333;
-  border-bottom: 2px solid #eee;
-  padding-bottom: 0.5rem;
-}
-
 table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 1rem;
 }
 
-th,
-td {
-  padding: 0.75rem;
-  border-bottom: 1px solid #ddd;
+th, td {
+  padding: 12px 15px;
   text-align: left;
+  border-bottom: 1px solid #ddd;
 }
 
 th {
   background-color: #f4f4f4;
   font-weight: bold;
-  color: #555;
 }
 
 tr:hover {
-  background-color: #f9f9f9;
+  background-color: #f1f1f1;
 }
 
-.no-records {
-  text-align: center;
-  padding: 2rem;
-  color: #888;
+.edit-btn, .delete-btn {
+  padding: 5px 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 5px;
+}
+
+.edit-btn {
+  background-color: #ffc107;
+  color: #fff;
+}
+
+.delete-btn {
+  background-color: #dc3545;
+  color: #fff;
 }
 </style>

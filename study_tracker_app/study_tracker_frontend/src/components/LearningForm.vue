@@ -1,291 +1,274 @@
 <template>
-  <div class="learning-form">
+  <div class="learning-form-container">
     <h2>{{ isEditing ? '学習記録の編集' : '学習記録の追加' }}</h2>
-    <form @submit.prevent="submitRecord">
+    <form @submit.prevent="saveRecord">
       <div class="form-group">
-        <label for="topic">テーマ:</label>
-        <select id="topic" v-model="selectedTopic" required>
-          <option disabled value="">テーマを選択してください</option>
-          <option v-for="topic in topics" :key="topic.id" :value="topic.id">{{ topic.title }}</option>
+        <label for="record-date">日付:</label>
+        <input type="date" id="record-date" v-model="form.date" required>
+      </div>
+      <div class="form-group">
+        <label for="record-topic">テーマ:</label>
+        <select id="record-topic" v-model="form.topic" required>
+          <option value="" disabled selected>テーマを選択</option>
+          <option v-for="topic in topics" :key="topic.id" :value="topic.id">
+            {{ topic.title }}
+          </option>
         </select>
+        <button type="button" @click="showTopicForm = true">新規テーマ</button>
       </div>
       <div class="form-group">
-        <label for="date">日付:</label>
-        <input type="date" id="date" v-model="recordDate" required />
+        <label for="record-planned">計画時間 (分):</label>
+        <input type="number" id="record-planned" v-model.number="form.planned_minutes" min="0" required>
       </div>
       <div class="form-group">
-        <label for="planned-minutes">予定時間 (分):</label>
-        <input type="number" id="planned-minutes" v-model="plannedMinutes" min="0" />
+        <label for="record-minutes">実績時間 (分):</label>
+        <input type="number" id="record-minutes" v-model.number="form.minutes" min="0" required>
       </div>
       <div class="form-group">
-        <label for="actual-minutes">実績時間 (分):</label>
-        <input type="number" id="actual-minutes" v-model="studyMinutes" min="0" />
+        <label for="record-memo">メモ:</label>
+        <textarea id="record-memo" v-model="form.memo"></textarea>
       </div>
-      <div class="form-group">
-        <label for="memo">メモ:</label>
-        <textarea id="memo" v-model="recordMemo"></textarea>
+      <div class="form-actions">
+        <button type="submit">{{ isEditing ? '更新' : '追加' }}</button>
+        <button type="button" v-if="isEditing" @click="cancelEdit">キャンセル</button>
       </div>
-      <button type="submit" class="submit-button">{{ isEditing ? '記録を更新' : '記録を保存' }}</button>
-      <button v-if="isEditing" @click="cancelEdit" type="button" class="cancel-button">キャンセル</button>
     </form>
-
-    <hr class="separator" />
-
-    <h3>新しいテーマの追加</h3>
-    <TopicForm @topic-saved="fetchTopics" />
-
-    <hr class="separator" />
-
-    <h3>テーマ名の修正</h3>
-    <TopicEditForm :topics="topics" @topic-updated="fetchTopics" />
-
-    <hr class="separator" />
-
-    <LearningRecordList :records="records" :topics="topics" @edit-record="handleEdit" />
+    
+    <div v-if="showTopicForm" class="modal-overlay" @click.self="showTopicForm = false">
+      <div class="modal-content">
+        <h4>新規テーマを追加</h4>
+        <input type="text" v-model="newTopicTitle" placeholder="テーマ名">
+        <div class="modal-actions">
+          <button @click="saveNewTopic">保存</button>
+          <button @click="showTopicForm = false">閉じる</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
-import { getTopics, getRecords, createRecord, updateRecord } from '../api/api.js';
-import TopicForm from './TopicForm.vue';
-import TopicEditForm from './TopicEditForm.vue';
-import LearningRecordList from './LearningRecordList.vue';
+import { ref, watch, computed, defineProps, defineEmits } from 'vue';
+import { createRecord, updateRecord, createTopic } from '@/api/api.js';
+import { format } from 'date-fns';
 
 /**
- * 学習テーマのリストを格納するリアクティブな参照。
- * @type {import('vue').Ref<Array<Object>>}
+ * @typedef {Object} LearningRecord
+ * @property {number | null} id - 記録のID。新規作成時はnull。
+ * @property {number} topic - 関連するテーマのID。
+ * @property {string} date - 学習記録の日付（'YYYY-MM-DD'）。
+ * @property {number} minutes - 実績時間（分）。
+ * @property {number} planned_minutes - 予定時間（分）。
+ * @property {string} memo - 記録のメモ。
  */
-const topics = ref([]);
-
 /**
- * 全ての学習記録を格納するリアクティブな参照。
- * @type {import('vue').Ref<Array<Object>>}
+ * @typedef {Object} Topic
+ * @property {number} id - テーマのID。
+ * @property {string} title - テーマのタイトル。
  */
-const records = ref([]);
+
+const props = defineProps({
+  /**
+   * @type {Array<Topic>}
+   * すべてのテーマの配列。
+   */
+  topics: {
+    type: Array,
+    default: () => [],
+  },
+  /**
+   * @type {LearningRecord | null}
+   * 編集対象の学習記録オブジェクト。編集時のみ値が設定されます。
+   */
+  editingRecord: {
+    type: Object,
+    default: null,
+  },
+});
+
+const emit = defineEmits(['record-saved', 'topic-saved', 'cancel-edit']);
 
 /**
- * 選択された学習テーマのID。
- * @type {import('vue').Ref<string>}
+ * @type {import('vue').Ref<LearningRecord>}
+ * フォームの入力データを格納するリアクティブなオブジェクト。
  */
-const selectedTopic = ref('');
+const form = ref({
+  id: null,
+  topic: '',
+  date: format(new Date(), 'yyyy-MM-dd'),
+  minutes: 0,
+  planned_minutes: 0,
+  memo: '',
+});
 
 /**
- * 学習記録の日付。
- * @type {import('vue').Ref<string>}
- */
-const recordDate = ref('');
-
-/**
- * 学習時間（分） - 実績。
- * @type {import('vue').Ref<number|null>}
- */
-const studyMinutes = ref(null);
-
-/**
- * 学習時間（分） - 予定。
- * @type {import('vue').Ref<number|null>}
- */
-const plannedMinutes = ref(null);
-
-/**
- * 学習記録のメモ。
- * @type {import('vue').Ref<string>}
- */
-const recordMemo = ref('');
-
-/**
- * 編集中の学習記録のID。nullの場合は新規作成モード。
- * @type {import('vue').Ref<number|null>}
- */
-const editingRecordId = ref(null);
-
-/**
- * 現在が編集モードかどうかを示す真偽値。
  * @type {import('vue').Ref<boolean>}
+ * 新規テーマ追加フォームの表示状態を管理するフラグ。
  */
-const isEditing = ref(false);
+const showTopicForm = ref(false);
 
 /**
- * バックエンドから学習テーマのリストを取得する非同期関数。
- * @async
- * @returns {Promise<void>}
+ * @type {import('vue').Ref<string>}
+ * 新規追加するテーマのタイトルを格納するリアクティブな変数。
  */
-const fetchTopics = async () => {
-  try {
-    const response = await getTopics();
-    topics.value = response.data;
-  } catch (error) {
-    console.error('テーマの取得に失敗しました:', error);
-  }
-};
+const newTopicTitle = ref('');
 
 /**
- * 全ての学習記録を取得する非同期関数。
- * @async
- * @returns {Promise<void>}
+ * @type {import('vue').ComputedRef<boolean>}
+ * フォームが編集モードかどうかを判定する算出プロパティ。
  */
-const fetchRecords = async () => {
-  try {
-    const response = await getRecords();
-    records.value = response.data;
-  } catch (error) {
-    console.error('学習記録の取得に失敗しました:', error);
-  }
-};
+const isEditing = computed(() => !!props.editingRecord);
 
 /**
- * 学習記録フォームのデータをバックエンドに送信（または更新）する非同期関数。
- * 既存の記録があるか日付とテーマで判定し、あれば更新、なければ新規作成します。
- * @async
- * @returns {Promise<void>}
- */
-const submitRecord = async () => {
-  try {
-    // 既存の記録を検索
-    const existingRecord = records.value.find(record =>
-      record.topic === selectedTopic.value && record.date === recordDate.value
-    );
-
-    // 入力が空の場合、0として扱う
-    const minutesToSave = studyMinutes.value === null ? 0 : studyMinutes.value;
-    const plannedMinutesToSave = plannedMinutes.value === null ? 0 : plannedMinutes.value;
-
-    const dataToSend = {
-      topic: selectedTopic.value,
-      date: recordDate.value,
-      minutes: minutesToSave,
-      planned_minutes: plannedMinutesToSave,
-      memo: recordMemo.value,
-    };
-
-    if (isEditing.value) {
-      // 既存の記録があれば更新
-      await updateRecord({ ...dataToSend, id: editingRecordId.value });
-      alert('学習記録が正常に更新されました！');
-      isEditing.value = false;
-    } else {
-      // 既存の記録がなければ新規作成
-      await createRecord(dataToSend);
-      alert('学習記録が正常に保存されました！');
-    }
-    
-    // フォームをリセット
-    resetForm();
-
-    // 記録リストを最新の状態に更新
-    await fetchRecords(); 
-
-  } catch (error) {
-    console.error('学習記録の登録/更新に失敗しました:', error);
-    alert('学習記録の登録/更新に失敗しました。');
-  }
-};
-
-/**
- * フォームをリセットするヘルパー関数。
+ * フォームの入力値を初期状態にリセットします。
  */
 const resetForm = () => {
-  selectedTopic.value = '';
-  recordDate.value = '';
-  studyMinutes.value = null;
-  plannedMinutes.value = null;
-  recordMemo.value = '';
-  editingRecordId.value = null;
+  form.value = {
+    id: null,
+    topic: '',
+    date: format(new Date(), 'yyyy-MM-dd'),
+    minutes: 0,
+    planned_minutes: 0,
+    memo: '',
+  };
 };
 
 /**
- * LearningRecordListから編集イベントを受け取り、フォームにデータをロードする関数。
- * @param {Object} record - 編集対象の学習記録。
+ * `editingRecord`プロパティの変更を監視し、フォームのデータを更新します。
+ * プロパティに値が渡されたらフォームにセットし、`null`になったらフォームをリセットします。
  */
-const handleEdit = (record) => {
-  selectedTopic.value = record.topic;
-  recordDate.value = record.date;
-  studyMinutes.value = record.minutes;
-  plannedMinutes.value = record.planned_minutes;
-  recordMemo.value = record.memo;
-  editingRecordId.value = record.id;
-  isEditing.value = true;
+watch(() => props.editingRecord, (newRecord) => {
+  if (newRecord) {
+    form.value = { ...newRecord };
+  } else {
+    resetForm();
+  }
+}, { immediate: true });
+
+/**
+ * フォームの入力データをAPIに送信し、保存（新規作成または更新）します。
+ * @async
+ */
+const saveRecord = async () => {
+  try {
+    if (isEditing.value) {
+      await updateRecord(form.value);
+    } else {
+      await createRecord(form.value);
+    }
+    emit('record-saved');
+  } catch (error) {
+    console.error('記録の保存に失敗しました:', error);
+  }
 };
 
 /**
- * 編集モードをキャンセルし、フォームをリセットする関数。
+ * 新規テーマを保存します。
+ * @async
+ */
+const saveNewTopic = async () => {
+  if (newTopicTitle.value.trim()) {
+    try {
+      await createTopic({ title: newTopicTitle.value });
+      emit('topic-saved');
+      newTopicTitle.value = '';
+      showTopicForm.value = false;
+    } catch (error) {
+      console.error('テーマの保存に失敗しました:', error);
+    }
+  }
+};
+
+/**
+ * 編集をキャンセルし、親コンポーネントに通知します。
  */
 const cancelEdit = () => {
-  resetForm();
-  isEditing.value = false;
+  emit('cancel-edit');
 };
-
-// コンポーネントがDOMにマウントされたときに、初期データ（テーマと記録）を取得
-onMounted(() => {
-  fetchTopics();
-  fetchRecords();
-});
 </script>
 
 <style scoped>
-.learning-form {
-  max-width: 600px;
-  margin: 20px auto;
-  padding: 20px;
-  background-color: #f9f9f9;
+.learning-form-container {
+  background-color: #fff;
+  padding: 2rem;
   border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
 .form-group {
-  margin-bottom: 15px;
+  display: flex;
+  flex-direction: column;
 }
 
 label {
-  display: block;
   font-weight: bold;
-  margin-bottom: 5px;
+  margin-bottom: 0.5rem;
 }
 
-input[type="date"],
-input[type="number"],
-textarea,
-select {
-  width: 100%;
-  padding: 8px;
+input, select, textarea {
+  padding: 0.75rem;
   border: 1px solid #ccc;
   border-radius: 4px;
-  box-sizing: border-box;
 }
 
-.submit-button {
-  background-color: #4CAF50;
-  color: white;
-  padding: 10px 15px;
+textarea {
+  resize: vertical;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+}
+
+button {
+  padding: 0.75rem 1.5rem;
   border: none;
   border-radius: 4px;
+  color: #fff;
   cursor: pointer;
-  font-size: 16px;
+  font-weight: bold;
 }
 
-.submit-button:hover {
-  background-color: #45a049;
+button[type="submit"] {
+  background-color: #42b983;
 }
 
-.cancel-button {
-  background-color: #f44336;
-  color: white;
-  padding: 10px 15px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 16px;
-  margin-left: 10px;
+button[type="button"] {
+  background-color: #6c757d;
 }
 
-.cancel-button:hover {
-  background-color: #d32f2f;
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
-.separator {
-  margin: 30px 0;
-  border: 0;
-  border-top: 1px solid #eee;
+.modal-content {
+  background-color: #fff;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
 }
 </style>
